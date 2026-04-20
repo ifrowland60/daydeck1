@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import type { DayEvent, Note, TodoUrgencyCounts } from "@/types/daydeck";
+import { getCalendarGridCellCount } from "@/lib/daydeck/calendar-grid";
+import type { CalendarDayContentSummary, DayEvent, Note, TodoUrgencyCounts } from "@/types/daydeck";
 
 type CalendarPageProps = {
   initialSelectedDateIso: string;
-  initialTodoUrgencyByDate: Record<string, TodoUrgencyCounts>;
+  initialCalendarSummary: CalendarDayContentSummary;
 };
 
 type Todo = {
@@ -33,6 +34,20 @@ type CalendarCell = {
   isCurrentMonth: boolean;
 };
 
+/** Matches GET /api/day-workspace JSON (carryCandidates filtered server-side). */
+type DayWorkspacePayload = {
+  notes?: Note[];
+  events?: DayEvent[];
+  todos: Todo[];
+  carryCandidates: CarryCandidate[];
+};
+
+const WORKSPACE_WARM_CACHE_MS = 12_000;
+
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+/** Two-letter labels — fits ~320px-wide grids without crowding day cells. */
+const WEEKDAY_LABELS_NARROW = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"] as const;
+
 const URGENCY_LEVELS: { value: TodoUrgency; fill: string; ring: string; label: string }[] = [
   { value: "urgent", fill: "bg-red-500", ring: "ring-red-600", label: "Urgent" },
   { value: "moderate", fill: "bg-amber-400", ring: "ring-amber-500", label: "Moderate" },
@@ -56,6 +71,66 @@ function summarizeOpenTodoUrgency(todos: Todo[]): TodoUrgencyCounts {
   return c;
 }
 
+function CalendarDayCornerContentIndicators({
+  eventCount,
+  noteCount,
+  selected,
+}: {
+  eventCount: number;
+  noteCount: number;
+  selected: boolean;
+}) {
+  const iconClass = selected ? "text-white/85" : "text-slate-600";
+  const numClass = selected ? "text-white/90" : "text-slate-600";
+
+  return (
+    <div
+      className={`pointer-events-none z-[1] flex min-w-0 shrink-0 items-center gap-x-1 gap-y-0 max-lg:max-w-[calc(100%-0.75rem)] max-lg:flex-row max-lg:flex-wrap lg:flex-col lg:items-start lg:gap-px ${iconClass}`}
+      aria-hidden
+    >
+      <span className="flex items-center gap-0.5 leading-none">
+        <svg
+          className="h-2 w-2 shrink-0 lg:h-2.5 lg:w-2.5 min-[400px]:h-2.5 min-[400px]:w-2.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+          <path d="M16 2v4M8 2v4M3 10h18" />
+        </svg>
+        <span
+          className={`min-w-[0.4rem] text-[6px] font-semibold tabular-nums min-[400px]:min-w-[0.45rem] min-[400px]:text-[7px] lg:min-w-[0.5rem] lg:text-[8px] ${numClass}`}
+        >
+          {eventCount}
+        </span>
+      </span>
+      <span className="flex items-center gap-0.5 leading-none">
+        <svg
+          className="h-2 w-2 shrink-0 lg:h-2.5 lg:w-2.5 min-[400px]:h-2.5 min-[400px]:w-2.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+          <path d="M14 2v6h6" />
+          <path d="M8 13h8M8 17h5" />
+        </svg>
+        <span
+          className={`min-w-[0.4rem] text-[6px] font-semibold tabular-nums min-[400px]:min-w-[0.45rem] min-[400px]:text-[7px] lg:min-w-[0.5rem] lg:text-[8px] ${numClass}`}
+        >
+          {noteCount}
+        </span>
+      </span>
+    </div>
+  );
+}
+
 function CalendarDayTodoIndicators({
   counts,
   selected,
@@ -71,13 +146,15 @@ function CalendarDayTodoIndicators({
   ] as const;
 
   return (
-    <div className="pointer-events-none flex items-center justify-center gap-0.5 pt-0.5">
+    <div className="pointer-events-none flex max-w-full shrink-0 items-center justify-center gap-1 min-[400px]:gap-1.5">
       {rows.map(({ n, on, off }, i) => (
-        <span key={i} className="inline-flex items-center gap-px">
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${n > 0 ? on : off}`} />
+        <span key={i} className="inline-flex items-center gap-0.5">
           <span
-            className={`min-w-[0.65rem] text-center text-[8px] font-medium tabular-nums leading-none sm:text-[9px] ${
-              selected ? "text-white/85" : "text-slate-600"
+            className={`h-1 w-1 shrink-0 rounded-full min-[400px]:h-1.5 min-[400px]:w-1.5 lg:h-1.5 lg:w-1.5 ${n > 0 ? on : off} ${n === 0 ? "opacity-50" : ""}`}
+          />
+          <span
+            className={`min-w-[0.45rem] text-center text-[6px] font-medium tabular-nums leading-none min-[400px]:min-w-[0.5rem] min-[400px]:text-[7px] lg:min-w-[0.6rem] lg:text-[8px] ${
+              selected ? (n === 0 ? "text-white/35" : "text-white/85") : n === 0 ? "text-slate-400/70" : "text-slate-600"
             }`}
           >
             {n}
@@ -97,8 +174,12 @@ function UrgencySwatchPicker({
   onChange: (urgency: TodoUrgency) => void;
   compact?: boolean;
 }) {
-  const outer = compact ? "h-7 w-7" : "h-8 w-8";
-  const inner = compact ? "h-3.5 w-3.5" : "h-[18px] w-[18px]";
+  const outer = compact
+    ? "h-6 w-6 max-lg:h-5 max-lg:w-5 lg:h-7 lg:w-7"
+    : "h-7 w-7 max-lg:h-6 max-lg:w-6 lg:h-8 lg:w-8";
+  const inner = compact
+    ? "h-3 w-3 max-lg:h-2.5 max-lg:w-2.5 lg:h-3.5 lg:w-3.5"
+    : "h-4 w-4 max-lg:h-3.5 max-lg:w-3.5 lg:h-[18px] lg:w-[18px]";
 
   return (
     <div role="radiogroup" aria-label="Urgency" className="flex shrink-0 items-center gap-1">
@@ -147,11 +228,11 @@ function WorkspaceRail({
         type="button"
         aria-expanded={open}
         onClick={onToggle}
-        className={`flex w-full shrink-0 items-center gap-2 border-b border-slate-100 px-3 py-3 text-left transition-colors hover:bg-slate-50 ${
+        className={`flex w-full shrink-0 items-center gap-2 border-b border-slate-100 px-2.5 py-2 text-left transition-colors hover:bg-slate-50 lg:px-3 lg:py-3 ${
           open ? "lg:justify-between lg:px-2 lg:py-2.5" : "lg:flex-col lg:items-center lg:justify-center lg:gap-2 lg:border-b-0 lg:py-4 lg:px-0"
         }`}
       >
-        <span className="text-sm font-medium text-slate-900 lg:hidden">{label}</span>
+        <span className="text-[13px] font-medium text-slate-900 lg:hidden">{label}</span>
         {open ? (
           <span className="hidden truncate text-sm font-medium text-slate-900 lg:inline">{label}</span>
         ) : (
@@ -169,7 +250,7 @@ function WorkspaceRail({
         </span>
       </button>
       <div className={open ? "flex flex-col" : "hidden"}>
-        <div className="px-3 py-3">{children}</div>
+        <div className="px-2.5 py-2 lg:px-3 lg:py-3">{children}</div>
       </div>
     </div>
   );
@@ -198,14 +279,13 @@ type EventDraft = Pick<DayEvent, "title" | "description" | "eventTime">;
 
 export function CalendarPage({
   initialSelectedDateIso,
-  initialTodoUrgencyByDate,
+  initialCalendarSummary,
 }: CalendarPageProps) {
   const initialDate = useMemo(() => new Date(`${initialSelectedDateIso}T00:00:00`), [initialSelectedDateIso]);
   const [visibleMonth, setVisibleMonth] = useState(new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
   const [selectedDateIso, setSelectedDateIso] = useState(initialSelectedDateIso);
   const [isWorkspaceOpen, setIsWorkspaceOpen] = useState(false);
-  const [todoUrgencyByDate, setTodoUrgencyByDate] =
-    useState<Record<string, TodoUrgencyCounts>>(initialTodoUrgencyByDate);
+  const [calendarSummary, setCalendarSummary] = useState<CalendarDayContentSummary>(initialCalendarSummary);
   const [notes, setNotes] = useState<Note[]>([]);
   const [events, setEvents] = useState<DayEvent[]>([]);
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -215,7 +295,12 @@ export function CalendarPage({
   const [newTodoUrgency, setNewTodoUrgency] = useState<TodoUrgency>("moderate");
   const [isEventsRailOpen, setIsEventsRailOpen] = useState(true);
   const [isTasksRailOpen, setIsTasksRailOpen] = useState(true);
-  const [isNotesBelowCalendarOpen, setIsNotesBelowCalendarOpen] = useState(true);
+  const [isNotesRailOpen, setIsNotesRailOpen] = useState(true);
+  const [isLgViewport, setIsLgViewport] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches,
+  );
+  /** Below `lg`: calendar-only until a day is opened (`isWorkspaceOpen`). Desktop always shows calendar + panel. */
+  const mobileShowsCalendar = isLgViewport || !isWorkspaceOpen;
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const pendingNoteSaveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -226,6 +311,13 @@ export function CalendarPage({
   const lastSavedEventSnapshot = useRef<Record<string, string>>({});
   const [expandedEventIds, setExpandedEventIds] = useState(() => new Set<string>());
   const [eventDrafts, setEventDrafts] = useState<Record<string, EventDraft>>({});
+  const workspaceWarmCacheRef = useRef<Map<string, { payload: DayWorkspacePayload; storedAt: number }>>(
+    new Map(),
+  );
+  const prefetchWorkspaceTimersRef = useRef<Partial<Record<string, ReturnType<typeof setTimeout>>>>({});
+  const mobileWorkspaceSectionRef = useRef<HTMLDivElement | null>(null);
+  const prevWorkspaceOpenRef = useRef(false);
+  const isWorkspaceOpenRef = useRef(false);
 
   const clearAllPendingWorkspaceSaveTimers = useCallback(() => {
     for (const timer of Object.values(pendingNoteSaveTimers.current)) {
@@ -241,6 +333,84 @@ export function CalendarPage({
   });
 
   useEffect(() => {
+    workspaceWarmCacheRef.current.clear();
+  }, [visibleMonth]);
+
+  useEffect(() => {
+    isWorkspaceOpenRef.current = isWorkspaceOpen;
+  }, [isWorkspaceOpen]);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px)");
+    const syncViewport = () => {
+      const lg = mq.matches;
+      setIsLgViewport(lg);
+      if (isWorkspaceOpenRef.current) {
+        if (lg) {
+          setIsEventsRailOpen(true);
+          setIsTasksRailOpen(true);
+          setIsNotesRailOpen(true);
+        } else {
+          setIsEventsRailOpen(false);
+          setIsTasksRailOpen(false);
+          setIsNotesRailOpen(false);
+        }
+      }
+    };
+    syncViewport();
+    mq.addEventListener("change", syncViewport);
+    return () => mq.removeEventListener("change", syncViewport);
+  }, []);
+
+  useEffect(() => {
+    if (!isLgViewport || !isWorkspaceOpen || prevWorkspaceOpenRef.current) {
+      prevWorkspaceOpenRef.current = isWorkspaceOpen;
+      return;
+    }
+    const id = requestAnimationFrame(() => {
+      mobileWorkspaceSectionRef.current?.scrollIntoView({ behavior: "auto", block: "nearest" });
+    });
+    prevWorkspaceOpenRef.current = isWorkspaceOpen;
+    return () => cancelAnimationFrame(id);
+  }, [isWorkspaceOpen, isLgViewport]);
+
+  const scheduleWorkspacePrefetch = useCallback((isoDate: string) => {
+    const prev = prefetchWorkspaceTimersRef.current[isoDate];
+    if (prev) {
+      clearTimeout(prev);
+    }
+    prefetchWorkspaceTimersRef.current[isoDate] = setTimeout(() => {
+      delete prefetchWorkspaceTimersRef.current[isoDate];
+      void (async () => {
+        try {
+          const response = await fetch(`/api/day-workspace?date=${encodeURIComponent(isoDate)}`, {
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            return;
+          }
+          const payload = (await response.json()) as DayWorkspacePayload;
+          workspaceWarmCacheRef.current.set(isoDate, { payload, storedAt: Date.now() });
+        } catch {
+          /* ignore prefetch errors */
+        }
+      })();
+    }, 120);
+  }, []);
+
+  const cancelWorkspacePrefetch = useCallback((isoDate: string) => {
+    const t = prefetchWorkspaceTimersRef.current[isoDate];
+    if (t) {
+      clearTimeout(t);
+      delete prefetchWorkspaceTimersRef.current[isoDate];
+    }
+  }, []);
+
+  const invalidateWorkspaceWarmCache = useCallback((isoDate: string) => {
+    workspaceWarmCacheRef.current.delete(isoDate);
+  }, []);
+
+  useEffect(() => {
     const year = visibleMonth.getFullYear();
     const month = visibleMonth.getMonth() + 1;
     let cancelled = false;
@@ -253,9 +423,13 @@ export function CalendarPage({
         if (!response.ok) {
           return;
         }
-        const payload = (await response.json()) as { todoUrgencyByDate?: Record<string, TodoUrgencyCounts> };
-        if (!cancelled) {
-          setTodoUrgencyByDate(payload.todoUrgencyByDate ?? {});
+        const payload = (await response.json()) as Partial<CalendarDayContentSummary> & { error?: string };
+        if (!cancelled && !payload.error) {
+          setCalendarSummary({
+            todoUrgencyByDate: payload.todoUrgencyByDate ?? {},
+            eventCountByDate: payload.eventCountByDate ?? {},
+            noteCountByDate: payload.noteCountByDate ?? {},
+          });
         }
       } catch {
         /* ignore month indicator fetch errors */
@@ -281,42 +455,54 @@ export function CalendarPage({
 
     let cancelled = false;
 
+    function applyWorkspacePayload(payload: DayWorkspacePayload) {
+      const loadedNotes = payload.notes ?? [];
+      setNotes(loadedNotes);
+      lastSavedNoteContent.current = {};
+      for (const n of loadedNotes) {
+        lastSavedNoteContent.current[n.id] = n.content;
+      }
+      const loadedEvents = payload.events ?? [];
+      setEvents(loadedEvents);
+      setExpandedEventIds(new Set());
+      setEventDrafts({});
+      lastSavedEventSnapshot.current = {};
+      for (const e of loadedEvents) {
+        lastSavedEventSnapshot.current[e.id] = serializeEvent(e);
+      }
+      setTodos(payload.todos ?? []);
+      setCarryCandidates(payload.carryCandidates ?? []);
+    }
+
     async function loadWorkspace() {
-      setIsLoadingWorkspace(true);
       setStatusMessage(null);
       clearAllPendingWorkspaceSaveTimers();
+
+      const cached = workspaceWarmCacheRef.current.get(selectedDateIso);
+      if (cached && Date.now() - cached.storedAt < WORKSPACE_WARM_CACHE_MS) {
+        workspaceWarmCacheRef.current.delete(selectedDateIso);
+        if (cancelled) {
+          return;
+        }
+        applyWorkspacePayload(cached.payload);
+        setIsLoadingWorkspace(false);
+        return;
+      }
+
+      setIsLoadingWorkspace(true);
       try {
-        const response = await fetch(`/api/day-workspace?date=${selectedDateIso}`, {
+        const response = await fetch(`/api/day-workspace?date=${encodeURIComponent(selectedDateIso)}`, {
           cache: "no-store",
         });
         if (!response.ok) {
           throw new Error("Unable to load selected day.");
         }
-        const payload = (await response.json()) as {
-          notes?: Note[];
-          events?: DayEvent[];
-          todos: Todo[];
-          carryCandidates: CarryCandidate[];
-        };
+        const payload = (await response.json()) as DayWorkspacePayload;
         if (cancelled) {
           return;
         }
-        const loadedNotes = payload.notes ?? [];
-        setNotes(loadedNotes);
-        lastSavedNoteContent.current = {};
-        for (const n of loadedNotes) {
-          lastSavedNoteContent.current[n.id] = n.content;
-        }
-        const loadedEvents = payload.events ?? [];
-        setEvents(loadedEvents);
-        setExpandedEventIds(new Set());
-        setEventDrafts({});
-        lastSavedEventSnapshot.current = {};
-        for (const e of loadedEvents) {
-          lastSavedEventSnapshot.current[e.id] = serializeEvent(e);
-        }
-        setTodos(payload.todos ?? []);
-        setCarryCandidates(payload.carryCandidates ?? []);
+        workspaceWarmCacheRef.current.delete(selectedDateIso);
+        applyWorkspacePayload(payload);
       } catch (error) {
         if (!cancelled) {
           setStatusMessage(error instanceof Error ? error.message : "Unable to load selected day.");
@@ -384,6 +570,7 @@ export function CalendarPage({
               return;
             }
             lastSavedNoteContent.current[noteId] = latest.content;
+            invalidateWorkspaceWarmCache(selectedDateIso);
           } catch {
             setStatusMessage("Unable to save note right now.");
           } finally {
@@ -392,18 +579,36 @@ export function CalendarPage({
         })();
       }, 500);
     }
-  }, [notes, isWorkspaceOpen, isLoadingWorkspace, selectedDateIso]);
+  }, [notes, isWorkspaceOpen, isLoadingWorkspace, selectedDateIso, invalidateWorkspaceWarmCache]);
 
   const cells = useMemo(() => buildMonthCells(visibleMonth), [visibleMonth]);
-  const todoUrgencyByDateForGrid = useMemo(() => {
+  const calendarSummaryForGrid = useMemo(() => {
     if (!isWorkspaceOpen || isLoadingWorkspace) {
-      return todoUrgencyByDate;
+      return calendarSummary;
     }
     return {
-      ...todoUrgencyByDate,
-      [selectedDateIso]: summarizeOpenTodoUrgency(todos),
+      todoUrgencyByDate: {
+        ...calendarSummary.todoUrgencyByDate,
+        [selectedDateIso]: summarizeOpenTodoUrgency(todos),
+      },
+      eventCountByDate: {
+        ...calendarSummary.eventCountByDate,
+        [selectedDateIso]: events.length,
+      },
+      noteCountByDate: {
+        ...calendarSummary.noteCountByDate,
+        [selectedDateIso]: notes.length,
+      },
     };
-  }, [todoUrgencyByDate, isWorkspaceOpen, isLoadingWorkspace, selectedDateIso, todos]);
+  }, [
+    calendarSummary,
+    isWorkspaceOpen,
+    isLoadingWorkspace,
+    selectedDateIso,
+    todos,
+    events,
+    notes,
+  ]);
   const sortedTodos = useMemo(() => sortTodosByUrgencyDescending(todos), [todos]);
   const selectedDateLabel = formatReadableDate(selectedDateIso);
 
@@ -426,6 +631,7 @@ export function CalendarPage({
       const newNote = payload.note;
       setNotes((prev) => [...prev, newNote]);
       lastSavedNoteContent.current[newNote.id] = "";
+      invalidateWorkspaceWarmCache(selectedDateIso);
     } catch {
       setStatusMessage("Unable to add note right now.");
     }
@@ -449,6 +655,7 @@ export function CalendarPage({
       const remainingAfterDelete = notes.filter((n) => n.id !== noteId);
       setNotes(remainingAfterDelete);
       delete lastSavedNoteContent.current[noteId];
+      invalidateWorkspaceWarmCache(selectedDateIso);
     } catch {
       setStatusMessage("Unable to remove note right now.");
     }
@@ -514,6 +721,7 @@ export function CalendarPage({
       lastSavedEventSnapshot.current[eventId] = serializeEvent(saved);
       setEvents((prev) => prev.map((e) => (e.id === eventId ? saved : e)));
       closeEventEditor(eventId);
+      invalidateWorkspaceWarmCache(selectedDateIso);
     } catch {
       setStatusMessage("Unable to save event right now.");
     }
@@ -535,6 +743,7 @@ export function CalendarPage({
       setEvents((prev) => [...prev, ev]);
       lastSavedEventSnapshot.current[ev.id] = serializeEvent(ev);
       openEventEditor(ev.id, ev);
+      invalidateWorkspaceWarmCache(selectedDateIso);
     } catch {
       setStatusMessage("Unable to add event right now.");
     }
@@ -553,17 +762,54 @@ export function CalendarPage({
       setEvents(remaining);
       closeEventEditor(eventId);
       delete lastSavedEventSnapshot.current[eventId];
+      invalidateWorkspaceWarmCache(selectedDateIso);
     } catch {
       setStatusMessage("Unable to remove event right now.");
     }
   }
 
+  function applyWorkspaceRailDefaults(lg: boolean) {
+    if (lg) {
+      setIsEventsRailOpen(true);
+      setIsTasksRailOpen(true);
+      setIsNotesRailOpen(true);
+    } else {
+      setIsEventsRailOpen(false);
+      setIsTasksRailOpen(false);
+      setIsNotesRailOpen(false);
+    }
+  }
+
+  function handleBackToCalendar() {
+    setIsWorkspaceOpen(false);
+    prevWorkspaceOpenRef.current = false;
+  }
+
   function handleSelectDate(isoDate: string) {
+    if (isLgViewport) {
+      if (isoDate === selectedDateIso && isWorkspaceOpen) {
+        setIsWorkspaceOpen(false);
+        return;
+      }
+    } else if (isoDate === selectedDateIso && isWorkspaceOpen) {
+      return;
+    }
     setSelectedDateIso(isoDate);
     setIsWorkspaceOpen(true);
-    setIsEventsRailOpen(true);
-    setIsTasksRailOpen(true);
-    setIsNotesBelowCalendarOpen(true);
+    const lg =
+      typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
+    applyWorkspaceRailDefaults(lg);
+  }
+
+  function handleGoToToday() {
+    const now = new Date();
+    setVisibleMonth(new Date(now.getFullYear(), now.getMonth(), 1));
+    const iso = toIsoDate(now);
+    setSelectedDateIso(iso);
+    setIsWorkspaceOpen(true);
+    const lg =
+      typeof window !== "undefined" && window.matchMedia("(min-width: 1024px)").matches;
+    applyWorkspaceRailDefaults(lg);
   }
 
   async function handleAddTodo() {
@@ -586,6 +832,7 @@ export function CalendarPage({
     setTodos((prev) => [...prev, payload.todo as Todo]);
     setNewTodo("");
     setNewTodoUrgency("moderate");
+    invalidateWorkspaceWarmCache(selectedDateIso);
   }
 
   async function handleToggleTodo(todoId: string, isComplete: boolean) {
@@ -600,6 +847,7 @@ export function CalendarPage({
       return;
     }
     setTodos((prev) => prev.map((todo) => (todo.id === todoId ? (payload.todo as Todo) : todo)));
+    invalidateWorkspaceWarmCache(selectedDateIso);
   }
 
   async function handleDeleteTodo(todoId: string) {
@@ -611,6 +859,7 @@ export function CalendarPage({
       return;
     }
     setTodos((prev) => prev.filter((todo) => todo.id !== todoId));
+    invalidateWorkspaceWarmCache(selectedDateIso);
   }
 
   async function handleUpdateTodoUrgency(todoId: string, urgency: TodoUrgency) {
@@ -625,6 +874,7 @@ export function CalendarPage({
       return;
     }
     setTodos((prev) => prev.map((todo) => (todo.id === todoId ? (payload.todo as Todo) : todo)));
+    invalidateWorkspaceWarmCache(selectedDateIso);
   }
 
   async function handleCarryForward() {
@@ -640,6 +890,7 @@ export function CalendarPage({
     }
     setTodos((prev) => [...prev, ...(payload.todos as Todo[])]);
     setCarryCandidates([]);
+    invalidateWorkspaceWarmCache(selectedDateIso);
     setDismissedCarryDates((prev) => {
       const next = new Set(prev);
       next.delete(selectedDateIso);
@@ -658,9 +909,9 @@ export function CalendarPage({
   const workspaceRailsInner = (
     <>
       {isLoadingWorkspace ? (
-        <p className="mb-2 text-sm text-slate-500">Loading day workspace...</p>
+        <p className="mb-2 text-xs text-slate-500 lg:text-sm">Loading day workspace...</p>
       ) : null}
-      {statusMessage ? <p className="mb-2 text-sm text-red-600">{statusMessage}</p> : null}
+      {statusMessage ? <p className="mb-2 text-xs text-red-600 lg:text-sm">{statusMessage}</p> : null}
 
       <div className="flex w-full flex-col divide-y divide-slate-200">
         <WorkspaceRail
@@ -668,16 +919,16 @@ export function CalendarPage({
           open={isEventsRailOpen}
           onToggle={() => setIsEventsRailOpen((v) => !v)}
         >
-          <div className="space-y-3">
+          <div className="space-y-2 lg:space-y-3">
             <button
               type="button"
               onClick={handleAddEvent}
-              className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className="w-full rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 lg:px-2.5 lg:py-1.5 lg:text-xs"
             >
               Add event
             </button>
             {events.length === 0 ? (
-              <p className="text-sm text-slate-500">
+              <p className="text-xs leading-relaxed text-slate-500 lg:text-sm">
                 No events yet. Add a title, details, and a time, then save. Saved events show as a compact line;
                 click one to edit.
               </p>
@@ -693,12 +944,12 @@ export function CalendarPage({
                       type="button"
                       aria-expanded={false}
                       onClick={() => openEventEditor(ev.id, ev)}
-                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5 text-left text-sm text-slate-900 transition hover:bg-slate-100"
+                      className="flex w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-slate-50/60 px-2.5 py-2 text-left text-[13px] text-slate-900 transition hover:bg-slate-100 lg:gap-3 lg:rounded-lg lg:px-3 lg:py-2.5 lg:text-sm"
                     >
                       <span className="min-w-0 truncate font-medium">
                         {ev.title.trim() ? ev.title.trim() : "Untitled event"}
                       </span>
-                      <span className="shrink-0 tabular-nums text-xs text-slate-500">
+                      <span className="shrink-0 tabular-nums text-[11px] text-slate-500 lg:text-xs">
                         {formatEventTimeLabel(ev.eventTime)}
                       </span>
                     </button>
@@ -712,45 +963,45 @@ export function CalendarPage({
                 };
 
                 return (
-                  <div key={ev.id} className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
-                    <label className="block text-xs font-medium text-slate-600">Title</label>
+                  <div key={ev.id} className="rounded-md border border-slate-200 bg-slate-50/60 p-2.5 lg:rounded-lg lg:p-3">
+                    <label className="block text-[11px] font-medium text-slate-600 lg:text-xs">Title</label>
                     <input
                       value={d.title}
                       onChange={(e) => updateEventDraft(ev.id, { title: e.target.value })}
                       maxLength={200}
                       placeholder="Event title"
-                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-slate-400"
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-[13px] text-slate-900 outline-none focus:border-slate-400 lg:py-1.5 lg:text-sm"
                     />
-                    <label className="mt-2 block text-xs font-medium text-slate-600">What it is</label>
+                    <label className="mt-2 block text-[11px] font-medium text-slate-600 lg:text-xs">What it is</label>
                     <textarea
                       value={d.description}
                       onChange={(e) => updateEventDraft(ev.id, { description: e.target.value })}
                       rows={2}
                       maxLength={500}
                       placeholder="Short descriptor"
-                      className="mt-1 w-full resize-y rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-slate-400"
+                      className="mt-1 w-full resize-y rounded-md border border-slate-300 bg-white px-2 py-1 text-[13px] text-slate-900 outline-none focus:border-slate-400 lg:py-1.5 lg:text-sm"
                     />
-                    <label className="mt-2 block text-xs font-medium text-slate-600">Time</label>
+                    <label className="mt-2 block text-[11px] font-medium text-slate-600 lg:text-xs">Time</label>
                     <input
                       type="time"
                       value={d.eventTime ?? ""}
                       onChange={(e) =>
                         updateEventDraft(ev.id, { eventTime: e.target.value ? e.target.value : null })
                       }
-                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-900 outline-none focus:border-slate-400"
+                      className="mt-1 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-[13px] text-slate-900 outline-none focus:border-slate-400 lg:py-1.5 lg:text-sm"
                     />
-                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                    <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5 lg:mt-3 lg:gap-2">
                       <button
                         type="button"
                         onClick={() => closeEventEditor(ev.id)}
-                        className="rounded-md border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 lg:px-3 lg:py-1.5 lg:text-xs"
                       >
                         Cancel
                       </button>
                       <button
                         type="button"
                         onClick={() => void handleSaveEvent(ev.id)}
-                        className="rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800"
+                        className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-medium text-white hover:bg-slate-800 lg:px-3 lg:py-1.5 lg:text-xs"
                       >
                         Save
                       </button>
@@ -771,23 +1022,23 @@ export function CalendarPage({
 
         <WorkspaceRail label="Tasks" open={isTasksRailOpen} onToggle={() => setIsTasksRailOpen((v) => !v)}>
           {carryCandidates.length > 0 && !dismissedCarryDates.has(selectedDateIso) ? (
-            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
-              <p className="text-sm font-medium text-amber-900">Carry unfinished tasks forward?</p>
-              <p className="mt-1 text-xs text-amber-800">
+            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 p-2.5 lg:mb-4 lg:rounded-lg lg:p-3">
+              <p className="text-xs font-medium text-amber-900 lg:text-sm">Carry unfinished tasks forward?</p>
+              <p className="mt-1 text-[11px] text-amber-800 lg:text-xs">
                 {carryCandidates.length} unfinished task{carryCandidates.length > 1 ? "s" : ""} from yesterday.
               </p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
                   onClick={handleCarryForward}
-                  className="rounded-md border border-amber-300 px-3 py-1.5 text-xs text-amber-900 hover:bg-amber-100"
+                  className="rounded-md border border-amber-300 px-2 py-1 text-[11px] text-amber-900 hover:bg-amber-100 lg:px-3 lg:py-1.5 lg:text-xs"
                 >
                   Carry forward
                 </button>
                 <button
                   type="button"
                   onClick={handleDeclineCarryForward}
-                  className="rounded-md border border-transparent px-2 py-1.5 text-xs text-amber-900 hover:underline"
+                  className="rounded-md border border-transparent px-2 py-1 text-[11px] text-amber-900 hover:underline lg:py-1.5 lg:text-xs"
                 >
                   Not now
                 </button>
@@ -795,28 +1046,32 @@ export function CalendarPage({
             </div>
           ) : null}
 
-          <div className="space-y-2">
+          <div className="space-y-1.5 lg:space-y-2">
             {sortedTodos.length === 0 ? (
-              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+              <p className="rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-xs text-slate-500 lg:rounded-lg lg:px-3 lg:py-2 lg:text-sm">
                 No tasks for this date yet
               </p>
             ) : (
               sortedTodos.map((todo) => (
                 <div
                   key={todo.id}
-                  className={`rounded-lg border px-3 py-2 ${urgencyRowClassName(todo.urgency)}`}
+                  className={`rounded-md border px-2.5 py-1.5 lg:rounded-lg lg:px-3 lg:py-2 ${urgencyRowClassName(todo.urgency)}`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <label className="flex min-w-0 flex-1 items-center gap-2 text-sm text-slate-700">
+                  <div className="flex min-w-0 flex-col gap-1.5 lg:flex-row lg:items-start lg:justify-between lg:gap-3">
+                    <label className="flex min-w-0 items-start gap-1.5 text-[13px] text-slate-700 lg:gap-2 lg:text-sm">
                       <input
                         type="checkbox"
                         checked={todo.isComplete}
                         onChange={() => handleToggleTodo(todo.id, todo.isComplete)}
-                        className="shrink-0"
+                        className="mt-0.5 shrink-0"
                       />
-                      <span className={todo.isComplete ? "line-through text-slate-400" : ""}>{todo.content}</span>
+                      <span
+                        className={`min-w-0 flex-1 break-words ${todo.isComplete ? "line-through text-slate-400" : ""}`}
+                      >
+                        {todo.content}
+                      </span>
                     </label>
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center justify-end gap-1.5 pl-5 lg:gap-2 lg:pl-0">
                       <UrgencySwatchPicker
                         value={todo.urgency}
                         onChange={(urgency) => void handleUpdateTodoUrgency(todo.id, urgency)}
@@ -824,7 +1079,7 @@ export function CalendarPage({
                       <button
                         type="button"
                         onClick={() => void handleDeleteTodo(todo.id)}
-                        className="text-xs text-slate-500 hover:text-red-600"
+                        className="shrink-0 px-1.5 py-1 text-[11px] leading-tight text-slate-500 hover:text-red-600 lg:min-h-0 lg:px-1 lg:text-xs"
                       >
                         Delete
                       </button>
@@ -835,22 +1090,67 @@ export function CalendarPage({
             )}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
+          <div className="mt-2 flex min-w-0 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center lg:mt-3 lg:gap-2">
             <input
               value={newTodo}
               onChange={(e) => setNewTodo(e.target.value)}
               placeholder=""
               aria-label="New task"
-              className="min-w-[8rem] flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
+              className="min-w-0 flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-[13px] text-slate-900 outline-none focus:border-slate-400 lg:rounded-lg lg:px-3 lg:py-2 lg:text-sm"
             />
-            <UrgencySwatchPicker value={newTodoUrgency} onChange={setNewTodoUrgency} compact />
-            <button
-              type="button"
-              onClick={() => void handleAddTodo()}
-              className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800"
-            >
-              Add
-            </button>
+            <div className="flex min-w-0 shrink-0 items-center justify-between gap-1.5 sm:justify-end lg:gap-2">
+              <UrgencySwatchPicker value={newTodoUrgency} onChange={setNewTodoUrgency} compact />
+              <button
+                type="button"
+                onClick={() => void handleAddTodo()}
+                className="shrink-0 rounded-md bg-slate-900 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-slate-800 lg:rounded-lg lg:px-4 lg:py-2 lg:text-sm"
+              >
+                Add
+              </button>
+            </div>
+          </div>
+        </WorkspaceRail>
+
+        <WorkspaceRail label="Notes" open={isNotesRailOpen} onToggle={() => setIsNotesRailOpen((v) => !v)}>
+          <div className="space-y-2 lg:space-y-3">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleAddNote}
+                className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50 lg:px-2.5 lg:py-1.5 lg:text-xs"
+              >
+                Add comment
+              </button>
+            </div>
+            {notes.length === 0 ? (
+              <p className="text-xs leading-relaxed text-slate-500 lg:text-sm">
+                No notes yet. Use &quot;Add comment&quot; for a separate note on this day.
+              </p>
+            ) : (
+              <div className="space-y-2 lg:space-y-3">
+                {notes.map((n) => (
+                  <div key={n.id} className="rounded-md border border-slate-200 bg-slate-50/50 p-2.5 lg:rounded-lg lg:p-3">
+                    <textarea
+                      value={n.content}
+                      onChange={(e) => handleNoteChange(n.id, e.target.value)}
+                      placeholder=""
+                      aria-label="Note"
+                      rows={4}
+                      className="w-full resize-y rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[13px] text-slate-900 outline-none focus:border-slate-400 lg:px-3 lg:py-2 lg:text-sm"
+                    />
+                    <div className="mt-1.5 flex justify-end lg:mt-2">
+                      <button
+                        type="button"
+                        onClick={() => void handleDeleteNote(n.id)}
+                        className="text-[11px] text-slate-500 hover:text-red-600 lg:text-xs"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </WorkspaceRail>
       </div>
@@ -858,31 +1158,38 @@ export function CalendarPage({
   );
 
   return (
-    <section className="flex flex-col gap-5 overflow-hidden rounded-xl border border-slate-200 bg-white lg:flex-row lg:items-start lg:gap-0 lg:overflow-visible">
+    <section className="flex flex-col gap-0 overflow-hidden rounded-xl border border-slate-200 bg-white lg:flex-row lg:items-start lg:gap-0 lg:overflow-visible">
       <div
-        className={`flex flex-col rounded-xl border border-slate-200 bg-white p-5 sm:p-6 lg:min-w-[22rem] lg:rounded-none lg:border-0 lg:border-r lg:border-slate-200 ${
+        className={`flex flex-col rounded-xl border border-slate-200 bg-white p-3 sm:p-5 md:p-6 max-lg:rounded-none max-lg:border-0 lg:min-w-[22rem] lg:rounded-none lg:border-0 lg:border-r lg:border-slate-200 motion-safe:transition-[flex-grow,flex-basis,max-width] motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none lg:flex ${
+          mobileShowsCalendar ? "max-lg:flex" : "max-lg:hidden"
+        } ${
           isWorkspaceOpen ? "lg:max-w-[54%] lg:shrink-0 lg:flex-[1_1_54%]" : "lg:flex-1"
         }`}
       >
-        <div className="shrink-0">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold text-slate-900">{monthLabel}</h2>
-          <div className="flex shrink-0 items-center gap-2">
-            {!isWorkspaceOpen ? (
-              <button
-                type="button"
-                onClick={() => setIsWorkspaceOpen(true)}
-                className="hidden rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 lg:inline-flex"
-              >
-                Day panel
-              </button>
-            ) : null}
+        <div
+          className={`shrink-0 origin-top will-change-transform motion-safe:transition-[transform] motion-safe:duration-500 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none ${
+            isWorkspaceOpen ? "lg:scale-[0.985]" : "lg:scale-100"
+          }`}
+        >
+        <div className="mb-3 flex min-w-0 flex-col gap-2 min-[400px]:mb-4 min-[400px]:flex-row min-[400px]:items-center min-[400px]:justify-between min-[400px]:gap-3">
+          <h2 className="min-w-0 shrink text-base font-semibold tracking-tight text-slate-900 min-[400px]:text-lg lg:text-xl">
+            {monthLabel}
+          </h2>
+          <div className="flex shrink-0 flex-wrap items-center justify-start gap-1.5 min-[400px]:justify-end min-[400px]:gap-2">
+            <button
+              type="button"
+              onClick={handleGoToToday}
+              aria-label="Go to today"
+              className="rounded-md border border-slate-300 px-2 py-1 text-[11px] font-medium text-slate-800 hover:bg-slate-50 min-[400px]:px-3 min-[400px]:py-1.5 min-[400px]:text-sm"
+            >
+              Today
+            </button>
             <button
               type="button"
               onClick={() =>
                 setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
               }
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              className="rounded-md border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 min-[400px]:px-3 min-[400px]:py-1.5 min-[400px]:text-sm"
             >
               Prev
             </button>
@@ -891,150 +1198,121 @@ export function CalendarPage({
               onClick={() =>
                 setVisibleMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
               }
-              className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+              className="rounded-md border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 min-[400px]:px-3 min-[400px]:py-1.5 min-[400px]:text-sm"
             >
               Next
             </button>
           </div>
         </div>
 
-        <div className="mb-2 grid grid-cols-7 gap-1 text-center text-xs font-medium uppercase tracking-wide text-slate-500">
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-            <div key={day} className="py-2">
-              {day}
+        <div className="mb-2 grid grid-cols-7 gap-px text-center text-[10px] font-medium uppercase tracking-wide text-slate-500 min-[400px]:gap-1 min-[400px]:text-xs">
+          {WEEKDAY_LABELS.map((day, i) => (
+            <div key={day} className="py-1 min-[400px]:py-2">
+              <span className="min-[400px]:hidden">{WEEKDAY_LABELS_NARROW[i]}</span>
+              <span className="hidden min-[400px]:inline">{day}</span>
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-7 gap-1">
+        <div className="grid grid-cols-7 gap-px items-start min-[400px]:gap-1">
           {cells.map((cell) => {
             const isSelected = cell.isoDate === selectedDateIso;
             const isToday = cell.isoDate === todayIso;
-            const todoCounts = todoUrgencyByDateForGrid[cell.isoDate];
+            const todoCounts = calendarSummaryForGrid.todoUrgencyByDate[cell.isoDate];
+            const eventCount = calendarSummaryForGrid.eventCountByDate[cell.isoDate] ?? 0;
+            const noteCount = calendarSummaryForGrid.noteCountByDate[cell.isoDate] ?? 0;
+
+            const cellSurface = isSelected
+              ? "border-slate-900 bg-slate-900 text-white focus-visible:ring-white/40 focus-visible:ring-offset-slate-900 motion-safe:hover:scale-[1.02] motion-safe:hover:shadow-lg"
+              : cell.isCurrentMonth
+                ? "border-slate-200 bg-white text-slate-800 hover:bg-slate-50 motion-safe:hover:scale-[1.04] motion-safe:hover:shadow-md"
+                : "border-slate-100 bg-slate-50 text-slate-400 motion-safe:hover:scale-[1.03] motion-safe:hover:shadow";
 
             return (
               <button
                 key={cell.isoDate}
                 type="button"
                 onClick={() => handleSelectDate(cell.isoDate)}
-                className={`relative flex min-h-[3.25rem] flex-col items-center justify-center gap-0.5 rounded-md border py-1 text-sm transition sm:min-h-[3.75rem] ${
-                  isSelected
-                    ? "border-slate-900 bg-slate-900 text-white"
-                    : cell.isCurrentMonth
-                      ? "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
-                      : "border-slate-100 bg-slate-50 text-slate-400"
-                }`}
+                onPointerEnter={() => scheduleWorkspacePrefetch(cell.isoDate)}
+                onPointerLeave={() => cancelWorkspacePrefetch(cell.isoDate)}
+                className={`relative z-0 grid w-full max-w-full touch-manipulation grid-rows-[auto_minmax(0,1fr)_auto] gap-0 rounded-md border px-1.5 py-1 text-left font-sans min-[400px]:gap-0.5 min-[400px]:px-1.5 min-[400px]:py-1 aspect-[3/4] min-h-0 transform-gpu min-[400px]:aspect-[5/4] motion-safe:transition-[transform,box-shadow,background-color,border-color,color] motion-safe:duration-300 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-safe:hover:z-10 motion-safe:active:scale-[0.93] motion-safe:active:shadow-sm motion-safe:active:duration-150 motion-reduce:transition-colors motion-reduce:duration-200 motion-reduce:hover:scale-100 motion-reduce:active:scale-100 focus-visible:z-20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400/90 focus-visible:ring-offset-2 ${cellSurface}`}
               >
-                {isToday && !isSelected ? (
-                  <span className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-slate-900" />
-                ) : null}
-                <span className="leading-none">{cell.dayNumber}</span>
-                <CalendarDayTodoIndicators counts={todoCounts} selected={isSelected} />
+                <div className="grid min-h-[1rem] w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-0.5">
+                  <CalendarDayCornerContentIndicators
+                    eventCount={eventCount}
+                    noteCount={noteCount}
+                    selected={isSelected}
+                  />
+                  {isToday ? (
+                    <span
+                      className={`mt-0.5 h-1 w-1 shrink-0 justify-self-end rounded-full min-[400px]:h-1.5 min-[400px]:w-1.5 ${
+                        isSelected ? "bg-white/80" : "bg-slate-900"
+                      }`}
+                      aria-hidden
+                    />
+                  ) : null}
+                </div>
+                <span className="flex min-h-0 min-w-0 items-center justify-center self-stretch text-center text-[10px] font-medium tabular-nums leading-none tracking-tight text-inherit min-[400px]:text-xs sm:text-sm">
+                  {cell.dayNumber}
+                </span>
+                <div className="flex min-h-[0.875rem] w-full min-w-0 justify-center px-0.5 pb-0.5 pt-px min-[400px]:px-1">
+                  <CalendarDayTodoIndicators counts={todoCounts} selected={isSelected} />
+                </div>
               </button>
             );
           })}
         </div>
         </div>
-
-        {isWorkspaceOpen ? (
-          <div className="mt-4 border-t border-slate-200 pt-4">
-            <button
-              type="button"
-              aria-expanded={isNotesBelowCalendarOpen}
-              onClick={() => setIsNotesBelowCalendarOpen((v) => !v)}
-              className="flex w-full items-center justify-between gap-2 rounded-lg py-1.5 text-left text-slate-700 transition-colors hover:bg-slate-50"
-            >
-              <span className="flex items-baseline gap-2">
-                <span className="text-sm font-medium">Notes</span>
-                <span className="text-xs tabular-nums text-slate-500">({notes.length})</span>
-              </span>
-              <span
-                className={`inline-block text-slate-500 transition-transform duration-300 ease-out motion-reduce:transition-none ${
-                  isNotesBelowCalendarOpen ? "rotate-180" : ""
-                }`}
-                aria-hidden
-              >
-                ▾
-              </span>
-            </button>
-
-            <div
-              className={`grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none ${
-                isNotesBelowCalendarOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-              }`}
-            >
-              <div className="min-h-0 overflow-hidden">
-                <div
-                  className={`flex flex-col gap-2 pt-2 transition-opacity duration-200 ease-out motion-reduce:transition-none ${
-                    isNotesBelowCalendarOpen ? "opacity-100" : "pointer-events-none opacity-0"
-                  }`}
-                >
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={handleAddNote}
-                      className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      Add comment
-                    </button>
-                  </div>
-                  {notes.length === 0 ? (
-                    <p className="text-sm text-slate-500">
-                      No notes yet. Use &quot;Add comment&quot; for a separate note on this day.
-                    </p>
-                  ) : (
-                    <div className="space-y-3">
-                      {notes.map((n) => (
-                        <div key={n.id} className="rounded-lg border border-slate-200 bg-slate-50/50 p-3">
-                          <textarea
-                            value={n.content}
-                            onChange={(e) => handleNoteChange(n.id, e.target.value)}
-                            placeholder=""
-                            aria-label="Note"
-                            rows={4}
-                            className="w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-slate-400"
-                          />
-                          <div className="mt-2 flex justify-end">
-                            <button
-                              type="button"
-                              onClick={() => void handleDeleteNote(n.id)}
-                              className="text-xs text-slate-500 hover:text-red-600"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
 
       <div
-        className={`flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white lg:rounded-none lg:border-0 lg:border-l lg:border-slate-200 lg:transition-[width] lg:duration-300 lg:ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:lg:transition-none ${
+        ref={mobileWorkspaceSectionRef}
+        className={`flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white max-lg:rounded-none max-lg:border-0 max-lg:border-t max-lg:border-slate-200 lg:rounded-none lg:border-0 lg:border-l lg:border-slate-200 lg:transition-[width,flex-basis,max-width] lg:duration-500 lg:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:lg:transition-none ${
+          mobileShowsCalendar ? "max-lg:hidden" : "max-lg:flex max-lg:min-h-0 max-lg:w-full max-lg:flex-1"
+        } ${
           isWorkspaceOpen
             ? "lg:flex-[0_0_46%] lg:max-w-[46%] lg:min-w-0 lg:overflow-visible"
             : "lg:max-w-0 lg:w-0 lg:shrink-0 lg:overflow-hidden"
-        } ${isWorkspaceOpen ? "lg:border-l" : "lg:border-l-0"}`}
+        } ${isWorkspaceOpen ? "lg:border-l" : "lg:border-l-0"} lg:flex`}
       >
         <div className="flex w-full min-w-0 flex-col">
+          {!mobileShowsCalendar ? (
+            <div className="flex min-w-0 items-center gap-2 border-b border-slate-200 px-3 py-2.5 lg:hidden">
+              <button
+                type="button"
+                onClick={handleBackToCalendar}
+                aria-label="Back to calendar"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-50 active:bg-slate-100"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden className="h-4 w-4" fill="none">
+                  <path
+                    d="M15 18l-6-6 6-6"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              </button>
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">Selected day</p>
+                <p className="mt-0.5 truncate text-sm font-semibold text-slate-900">{selectedDateLabel}</p>
+              </div>
+            </div>
+          ) : null}
+
           <button
             type="button"
             aria-expanded={isWorkspaceOpen}
             onClick={() => setIsWorkspaceOpen((prev) => !prev)}
-            className="flex w-full items-center justify-between px-5 py-4 text-left transition-colors hover:bg-slate-50 sm:px-6 lg:shrink-0"
+            className="hidden w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-slate-50 sm:px-6 lg:flex lg:shrink-0 lg:py-4"
           >
             <div>
               <p className="text-xs uppercase tracking-[0.14em] text-slate-500">Selected day</p>
               <p className="mt-1 text-base font-semibold text-slate-900">{selectedDateLabel}</p>
             </div>
             <span className="flex items-center gap-2 text-sm text-slate-600">
-              <span className="lg:hidden">{isWorkspaceOpen ? "Hide" : "Open"}</span>
-              <span className="hidden lg:inline">{isWorkspaceOpen ? "Close panel" : "Open panel"}</span>
+              <span>{isWorkspaceOpen ? "Close panel" : "Open panel"}</span>
               <span
                 className={`inline-block transition-transform duration-300 ease-out motion-reduce:transition-none ${
                   isWorkspaceOpen ? "rotate-180" : ""
@@ -1047,27 +1325,13 @@ export function CalendarPage({
           </button>
 
           <div
-            className={`grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.33,1,0.68,1)] motion-reduce:transition-none lg:hidden ${
-              isWorkspaceOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]"
-            }`}
-          >
-            <div className="min-h-0 overflow-hidden">
-              <div
-                className={`border-t border-slate-200 p-5 sm:p-6 transition-opacity duration-200 ease-out motion-reduce:transition-none ${
-                  isWorkspaceOpen ? "opacity-100" : "pointer-events-none opacity-0"
-                }`}
-              >
-                {workspaceRailsInner}
-              </div>
-            </div>
-          </div>
-
-          <div
-            className={`hidden flex-col border-t border-slate-200 lg:flex lg:border-t-0 ${
-              isWorkspaceOpen ? "opacity-100" : "pointer-events-none opacity-0"
+            className={`flex min-h-0 flex-col border-t border-slate-200 px-3.5 py-3 sm:px-5 sm:py-5 lg:px-4 lg:py-4 ${
+              mobileShowsCalendar ? "max-lg:hidden" : "max-lg:flex max-lg:min-h-0 max-lg:flex-1 max-lg:overflow-y-auto"
+            } ${
+              isWorkspaceOpen ? "lg:opacity-100" : "lg:pointer-events-none lg:opacity-0"
             } transition-opacity duration-200 ease-out motion-reduce:transition-none`}
           >
-            <div className="flex flex-col px-4 py-4 sm:px-5 sm:py-5">{workspaceRailsInner}</div>
+            {workspaceRailsInner}
           </div>
         </div>
       </div>
@@ -1143,7 +1407,8 @@ function buildMonthCells(visibleMonth: Date): CalendarCell[] {
     cells.push({ isoDate: toIsoDate(date), dayNumber, isCurrentMonth: true });
   }
 
-  while (cells.length < 42) {
+  const targetLength = getCalendarGridCellCount(year, month + 1);
+  while (cells.length < targetLength) {
     const dayNumber = cells.length - (firstDayIndex + daysInMonth) + 1;
     const date = new Date(year, month + 1, dayNumber);
     cells.push({ isoDate: toIsoDate(date), dayNumber, isCurrentMonth: false });

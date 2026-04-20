@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { CalendarPage } from "@/components/calendar/calendar-page";
 import { logoutAction } from "@/lib/auth/actions";
 import { getSupabaseServerClient } from "@/lib/db/supabase-server";
-import { getTodoUrgencyCountsByDateForCalendarMonth } from "@/lib/daydeck/days";
+import { getCalendarDayContentSummaryForMonth } from "@/lib/daydeck/days";
 
 export const dynamic = "force-dynamic";
 
@@ -19,25 +20,23 @@ export default async function AppPage() {
 
   const today = new Date();
   const initialSelectedDateIso = today.toISOString().slice(0, 10);
-  const initialTodoUrgencyByDate = await getTodoUrgencyCountsByDateForCalendarMonth(
+  const initialCalendarSummary = await getCalendarDayContentSummaryForMonth(
     today.getFullYear(),
     today.getMonth() + 1,
   );
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-6xl px-6 py-8 sm:py-10">
-      <header className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-medium tracking-tight text-slate-900 sm:text-5xl">Daydeck</h1>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            aria-label="Settings"
-            title="Settings"
-            className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 text-slate-700 transition hover:bg-slate-50"
+    <main className="app-page-safe mx-auto min-h-screen w-full max-w-6xl">
+      <header className="mb-4 flex items-center justify-between lg:mb-6">
+        <h1 className="text-lg font-light tracking-[0.04em] text-slate-500 sm:text-xl lg:text-2xl">Daydeck</h1>
+        <div className="flex items-center gap-1.5 lg:gap-2">
+          <Link
+            href="/app/settings"
+            aria-label="Account settings"
+            title="Account settings"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-50 lg:h-10 lg:w-10 lg:rounded-lg"
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none">
+            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 lg:h-5 lg:w-5" fill="none">
               <path
                 d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z"
                 stroke="currentColor"
@@ -53,15 +52,15 @@ export default async function AppPage() {
                 strokeLinejoin="round"
               />
             </svg>
-          </button>
+          </Link>
           <form action={logoutAction}>
             <button
               type="submit"
               aria-label="Log out"
               title="Log out"
-              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 text-slate-700 transition hover:bg-slate-50"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 text-slate-700 transition hover:bg-slate-50 lg:h-10 lg:w-10 lg:rounded-lg"
             >
-              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-5 w-5" fill="none">
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4 lg:h-5 lg:w-5" fill="none">
                 <path
                   d="M14 4h-8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8"
                   stroke="currentColor"
@@ -84,7 +83,7 @@ export default async function AppPage() {
 
       <CalendarPage
         initialSelectedDateIso={initialSelectedDateIso}
-        initialTodoUrgencyByDate={initialTodoUrgencyByDate}
+        initialCalendarSummary={initialCalendarSummary}
       />
     </main>
   );

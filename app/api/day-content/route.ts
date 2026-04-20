@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getTodoUrgencyCountsByDateForCalendarMonth } from "@/lib/daydeck/days";
+import { getCalendarDayContentSummaryForMonth } from "@/lib/daydeck/days";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +14,8 @@ export async function GET(request: Request) {
   }
 
   try {
-    const todoUrgencyByDate = await getTodoUrgencyCountsByDateForCalendarMonth(year, month);
-    return NextResponse.json({ todoUrgencyByDate });
+    const summary = await getCalendarDayContentSummaryForMonth(year, month);
+    return NextResponse.json(summary);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load day content.";
     const status = /authenticated/i.test(message) ? 401 : 500;

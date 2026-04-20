@@ -90,3 +90,10 @@ export type TodoUrgencyCounts = {
   moderate: number;
   not_urgent: number;
 };
+
+/** Month grid payload for calendar indicators (todos, events, notes per ISO date). */
+export type CalendarDayContentSummary = {
+  todoUrgencyByDate: Record<string, TodoUrgencyCounts>;
+  eventCountByDate: Record<string, number>;
+  noteCountByDate: Record<string, number>;
+};

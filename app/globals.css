@@ -24,3 +24,30 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/**
+ * iPhone SE / notched devices: horizontal + bottom padding uses safe-area insets.
+ * (Avoid mixing with Tailwind `px-*` on the same element — that would double-set padding.)
+ */
+.app-page-safe {
+  padding-top: 1.25rem;
+  padding-left: max(1rem, env(safe-area-inset-left, 0px));
+  padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+}
+
+@media (min-width: 640px) {
+  .app-page-safe {
+    padding-top: 2rem;
+    padding-left: max(1.5rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1.5rem, env(safe-area-inset-right, 0px));
+    padding-bottom: max(2rem, env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (min-width: 1024px) {
+  .app-page-safe {
+    padding-top: 2.5rem;
+    padding-bottom: max(2.5rem, env(safe-area-inset-bottom, 0px));
+  }
+}

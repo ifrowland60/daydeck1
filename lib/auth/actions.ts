@@ -10,6 +10,11 @@ function toAuthPath(message: string, type: "error" | "success" = "error") {
   return `/auth?${search.toString()}`;
 }
 
+function toSettingsPath(message: string, type: "error" | "success" = "error") {
+  const search = new URLSearchParams({ [type]: message });
+  return `/app/settings?${search.toString()}`;
+}
+
 async function getRequestOrigin() {
   const headerList = await headers();
   const origin = headerList.get("origin");
@@ -33,8 +38,15 @@ function buildAuthRedirectUrl(origin: string, path = "/auth") {
   }
 }
 
+/** Trim + lowercase so sign-in matches sign-up; avoids HTML `type="email"` rejecting some valid addresses. */
+function normalizeAuthEmail(raw: unknown): string {
+  return String(raw ?? "")
+    .trim()
+    .toLowerCase();
+}
+
 export async function loginAction(formData: FormData) {
-  const email = String(formData.get("email") ?? "").trim();
+  const email = normalizeAuthEmail(formData.get("email"));
   const password = String(formData.get("password") ?? "");
 
   if (!email || !password) {
@@ -52,11 +64,16 @@ export async function loginAction(formData: FormData) {
 }
 
 export async function signupAction(formData: FormData) {
-  const email = String(formData.get("email") ?? "").trim();
+  const email = normalizeAuthEmail(formData.get("email"));
   const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
 
   if (!email || !password) {
     redirect(toAuthPath("Email and password are required."));
+  }
+
+  if (password !== confirmPassword) {
+    redirect(toAuthPath("Passwords do not match."));
   }
 
   if (password.length < 8) {
@@ -80,7 +97,7 @@ export async function signupAction(formData: FormData) {
 }
 
 export async function resetPasswordAction(formData: FormData) {
-  const email = String(formData.get("email") ?? "").trim();
+  const email = normalizeAuthEmail(formData.get("email"));
 
   if (!email) {
     redirect(toAuthPath("Email is required for password reset."));
@@ -108,6 +125,11 @@ export async function resetPasswordAction(formData: FormData) {
 
 export async function updatePasswordAction(formData: FormData) {
   const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
+
+  if (password !== confirmPassword) {
+    redirect(toAuthPath("Passwords do not match."));
+  }
 
   if (!password || password.length < 8) {
     redirect(toAuthPath("Password must be at least 8 characters."));
@@ -127,4 +149,56 @@ export async function logoutAction() {
   const supabase = await getSupabaseServerClient();
   await supabase.auth.signOut();
   redirect("/auth");
+}
+
+export async function changePasswordSettingsAction(formData: FormData) {
+  const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
+
+  if (password !== confirmPassword) {
+    redirect(toSettingsPath("New passwords do not match."));
+  }
+
+  if (!password || password.length < 8) {
+    redirect(toSettingsPath("Password must be at least 8 characters."));
+  }
+
+  const supabase = await getSupabaseServerClient();
+  const { error } = await supabase.auth.updateUser({ password });
+
+  if (error) {
+    redirect(toSettingsPath(error.message));
+  }
+
+  redirect(toSettingsPath("Your password has been updated.", "success"));
+}
+
+/** Sends a password recovery link to the signed-in user's email (same flow as /auth reset). */
+export async function requestPasswordResetEmailFromSettingsAction() {
+  const supabase = await getSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user?.email) {
+    redirect(toSettingsPath("No email address is associated with this account."));
+  }
+
+  const origin = await getRequestOrigin();
+  const redirectTo = buildAuthRedirectUrl(
+    origin,
+    "/auth/confirm?next=%2Fauth%3Fmode%3Dupdate",
+  );
+  const { error } = await supabase.auth.resetPasswordForEmail(user.email, redirectTo ? { redirectTo } : undefined);
+
+  if (error) {
+    redirect(toSettingsPath(error.message));
+  }
+
+  redirect(
+    toSettingsPath(
+      "If your account uses this email, a password reset link has been sent.",
+      "success",
+    ),
+  );
 }

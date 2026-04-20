@@ -63,15 +63,24 @@ export function AuthForm({
         <p className="mt-2 text-sm text-slate-600">{active.description}</p>
       </div>
 
-      {mode !== "update" ? (
+      {mode === "update" ? (
+        <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+          Recovery verified. Enter a new password below.
+        </div>
+      ) : mode === "reset" ? (
+        <div className="mb-6">
+          <button
+            type="button"
+            onClick={() => setMode("login")}
+            className="text-sm font-medium text-slate-600 underline-offset-2 transition hover:text-slate-900 hover:underline"
+          >
+            ← Back to log in
+          </button>
+        </div>
+      ) : (
         <div className="mb-6 flex rounded-lg border border-slate-200 bg-slate-50 p-1">
           <ModeButton mode={mode} target="login" onClick={setMode} label="Log in" />
           <ModeButton mode={mode} target="signup" onClick={setMode} label="Sign up" />
-          <ModeButton mode={mode} target="reset" onClick={setMode} label="Reset" />
-        </div>
-      ) : (
-        <div className="mb-6 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-          Recovery verified. Enter a new password below.
         </div>
       )}
 
@@ -96,8 +105,12 @@ export function AuthForm({
             <input
               id="email"
               name="email"
-              type="email"
+              type="text"
+              inputMode="email"
               autoComplete="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
               required
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
               placeholder="you@example.com"
@@ -106,21 +119,40 @@ export function AuthForm({
         ) : null}
 
         {mode !== "reset" ? (
-          <div className="space-y-1">
-            <label htmlFor="password" className="text-sm font-medium text-slate-700">
-              {mode === "update" ? "New password" : "Password"}
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              required
-              minLength={8}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-              placeholder="At least 8 characters"
-            />
-          </div>
+          <>
+            <div className="space-y-1">
+              <label htmlFor="password" className="text-sm font-medium text-slate-700">
+                {mode === "update" ? "New password" : "Password"}
+              </label>
+              <input
+                id="password"
+                name="password"
+                type="password"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                required
+                minLength={8}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                placeholder="At least 8 characters"
+              />
+            </div>
+            {mode === "signup" || mode === "update" ? (
+              <div className="space-y-1">
+                <label htmlFor="confirmPassword" className="text-sm font-medium text-slate-700">
+                  {mode === "update" ? "Confirm new password" : "Confirm password"}
+                </label>
+                <input
+                  id="confirmPassword"
+                  name="confirmPassword"
+                  type="password"
+                  autoComplete="new-password"
+                  required
+                  minLength={8}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                  placeholder={mode === "update" ? "Re-enter your new password" : "Re-enter your password"}
+                />
+              </div>
+            ) : null}
+          </>
         ) : null}
 
         <button
@@ -129,6 +161,16 @@ export function AuthForm({
         >
           {active.action}
         </button>
+
+        {mode === "login" ? (
+          <button
+            type="button"
+            onClick={() => setMode("reset")}
+            className="w-full pt-1 text-center text-sm font-medium text-slate-600 underline-offset-2 transition hover:text-slate-900 hover:underline"
+          >
+            Reset password
+          </button>
+        ) : null}
       </form>
     </div>
   );

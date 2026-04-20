@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCarryForwardCandidates } from "@/lib/daydeck/carry-forward";
-import { getDayByDate } from "@/lib/daydeck/days";
-import { getEventsByDayId } from "@/lib/daydeck/events";
-import { getNotesByDayId } from "@/lib/daydeck/notes";
-import { getTodosByDayId } from "@/lib/daydeck/todos";
+import { getDayWorkspaceBundle } from "@/lib/daydeck/day-workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +13,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const day = await getDayByDate(date);
-    const notes = day ? await getNotesByDayId(day.id) : [];
-    const events = day ? await getEventsByDayId(day.id) : [];
-    const todos = day ? await getTodosByDayId(day.id) : [];
-    const carryCandidates = await getCarryForwardCandidates(date);
+    const { dayId, notes, events, todos, carryCandidates } = await getDayWorkspaceBundle(date);
     const alreadyCarried = new Set(
       todos
         .filter((todo) => todo.carriedFromTodoId)
@@ -32,7 +24,7 @@ export async function GET(request: Request) {
     );
 
     return NextResponse.json({
-      dayId: day?.id ?? null,
+      dayId,
       notes,
       events,
       todos,

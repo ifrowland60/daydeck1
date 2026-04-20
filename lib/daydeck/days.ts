@@ -1,6 +1,7 @@
 import { getSupabaseServerClient } from "@/lib/db/supabase-server";
+import { getCalendarGridCellCount } from "@/lib/daydeck/calendar-grid";
 import { mapDay } from "@/lib/daydeck/mappers";
-import type { Day, DayRow, TodoUrgencyCounts } from "@/types/daydeck";
+import type { CalendarDayContentSummary, Day, DayRow, TodoUrgencyCounts } from "@/types/daydeck";
 
 export async function getSignedInUserId() {
   const supabase = await getSupabaseServerClient();
@@ -76,7 +77,7 @@ export async function getDayDatesWithContentForMonth(
   return data.map((row) => row.date);
 }
 
-/** ISO date bounds (inclusive) for the 6×7 grid for a calendar month (matches client `buildMonthCells`). */
+/** ISO date bounds (inclusive) for the visible month grid (matches client `buildMonthCells`). */
 export function getCalendarGridDateBounds(year: number, month: number): { start: string; end: string } {
   const monthIndex = month - 1;
   const firstDay = new Date(year, monthIndex, 1);
@@ -94,7 +95,8 @@ export function getCalendarGridDateBounds(year: number, month: number): { start:
     const date = new Date(year, monthIndex, dayNumber);
     isos.push(date.toISOString().slice(0, 10));
   }
-  while (isos.length < 42) {
+  const targetLength = getCalendarGridCellCount(year, month);
+  while (isos.length < targetLength) {
     const dayNumber = isos.length - (firstDayIndex + daysInMonth) + 1;
     const date = new Date(year, monthIndex + 1, dayNumber);
     isos.push(date.toISOString().slice(0, 10));
@@ -103,33 +105,38 @@ export function getCalendarGridDateBounds(year: number, month: number): { start:
   return { start: sorted[0]!, end: sorted[sorted.length - 1]! };
 }
 
-type DayRowWithTodos = {
+type DayRowCalendarSummary = {
   date: string;
   todos: Array<{ urgency: string; is_complete?: boolean }> | null;
+  day_events: Array<{ id: string }> | null;
+  notes: Array<{ id: string }> | null;
 };
 
-/** Open todo counts by urgency for each day in the visible calendar grid (inclusive). */
-export async function getTodoUrgencyCountsByDateForCalendarMonth(
+/** Open todos by urgency, event row counts, and note row counts per day for the visible month grid. */
+export async function getCalendarDayContentSummaryForMonth(
   year: number,
   month: number,
-): Promise<Record<string, TodoUrgencyCounts>> {
+): Promise<CalendarDayContentSummary> {
   const supabase = await getSupabaseServerClient();
   const userId = await getSignedInUserId();
   const { start, end } = getCalendarGridDateBounds(year, month);
 
   const { data, error } = await supabase
     .from("days")
-    .select("date, todos(urgency, is_complete)")
+    .select("date, todos(urgency, is_complete), day_events(id), notes(id)")
     .eq("user_id", userId)
     .gte("date", start)
     .lte("date", end)
-    .returns<DayRowWithTodos[]>();
+    .returns<DayRowCalendarSummary[]>();
 
   if (error) {
     throw new Error(error.message);
   }
 
-  const result: Record<string, TodoUrgencyCounts> = {};
+  const todoUrgencyByDate: Record<string, TodoUrgencyCounts> = {};
+  const eventCountByDate: Record<string, number> = {};
+  const noteCountByDate: Record<string, number> = {};
+
   for (const row of data ?? []) {
     const counts: TodoUrgencyCounts = { urgent: 0, moderate: 0, not_urgent: 0 };
     for (const t of row.todos ?? []) {
@@ -145,8 +152,19 @@ export async function getTodoUrgencyCountsByDateForCalendarMonth(
       }
     }
     if (counts.urgent > 0 || counts.moderate > 0 || counts.not_urgent > 0) {
-      result[row.date] = counts;
+      todoUrgencyByDate[row.date] = counts;
+    }
+
+    const evCount = row.day_events?.length ?? 0;
+    if (evCount > 0) {
+      eventCountByDate[row.date] = evCount;
+    }
+
+    const nCount = row.notes?.length ?? 0;
+    if (nCount > 0) {
+      noteCountByDate[row.date] = nCount;
     }
   }
-  return result;
+
+  return { todoUrgencyByDate, eventCountByDate, noteCountByDate };
 }

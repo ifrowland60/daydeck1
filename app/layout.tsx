@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -15,6 +15,11 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Daydeck",
   description: "A calm day-centered planning workspace.",
+};
+
+/** Lets `env(safe-area-inset-*)` reflect notch / home indicator on iOS. */
+export const viewport: Viewport = {
+  viewportFit: "cover",
 };
 
 export default function RootLayout({
