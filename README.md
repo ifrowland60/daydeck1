@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Daydeck MVP App
 
-## Getting Started
+Daydeck is a calm, day-centered planning app. This repository contains the MVP web app
+foundation built with Next.js, TypeScript, Tailwind, and Supabase.
 
-First, run the development server:
+## Stack
+
+- Next.js (App Router)
+- React + TypeScript
+- Tailwind CSS
+- Supabase (Auth + Postgres)
+- Vercel deployment target
+
+## Project Structure
+
+```text
+app/
+components/
+lib/
+  auth/
+  db/
+  daydeck/
+types/
+styles/
+```
+
+## Local Setup
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Copy env template and add project values:
+
+```bash
+cp .env.example .env.local
+```
+
+3. Set these values in `.env.local`:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+
+Legacy compatibility:
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY` is also supported for older Supabase projects.
+
+4. Run the app:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Then open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supabase Notes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `lib/db/supabase-browser.ts` contains the browser client helper.
+- `lib/db/supabase-server.ts` contains the server client helper for App Router usage.
+- `supabase/phase-3-schema.sql` contains the MVP schema and RLS policies.
+- `lib/daydeck/` contains the Phase 3 data-access layer for days, notes, todos, and carry-forward logic.
 
-## Learn More
+## Phase 3 Database Setup
 
-To learn more about Next.js, take a look at the following resources:
+Run this once in Supabase SQL Editor:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Open `supabase/phase-3-schema.sql`
+2. Copy/paste into SQL Editor
+3. Execute
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+This creates:
+- `days`, `notes`, `todos` tables
+- `updated_at` triggers
+- row-level security policies scoped to authenticated users
 
-## Deploy on Vercel
+## Vercel Setup
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+When creating the Vercel project, add the same environment variables from `.env.local`:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+
+## Current Phase
+
+Phase 3 is in progress: authentication is complete and core data model + data-access functions are scaffolded.
+Next step is Phase 4 calendar shell and selected-day panel wiring.
